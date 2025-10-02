@@ -1,6 +1,7 @@
 # ignoring folder client/js, but whitelisting some of the files, inspired by
 # https://gist.github.com/pdewouters/5831782
 /docs/
+.gitignore
 /old_nets/
 scaramanga.json
 scaramanga_sl.json
