@@ -1,0 +1,442 @@
+1. Components You Need
+
+Game environment
+
+Your variant rules (already working in Fairy-Stockfish or your own move generator).
+
+Provides: legal moves, applies moves, detects terminal result (win/loss/draw).
+
+Neural network (policy + value)
+
+Input: board position (10×10, encodings for camel, zebra, etc.).
+
+Output:
+
+Policy head → probability distribution over legal moves.
+
+Value head → estimated win/draw/loss probability from that position.
+
+Search algorithm (MCTS)
+
+Uses NN outputs to guide exploration.
+
+Balances exploration vs exploitation.
+
+Produces “improved policy” (visit counts) for training.
+
+Trainer
+
+Runs self-play games.
+
+Collects (state, policy, outcome) triples.
+
+Trains NN on this data (minimizes policy + value loss).
+
+
+
+
+
+1. Self-Play
+
+Goal: generate data that the network can learn from.
+
+Start with a board position (full board or endgame subset).
+
+Use current network + MCTS to select moves.
+
+Play the game until it ends.
+
+For each move/position, store:
+
+Input vector (encoded board)
+
+Policy target (MCTS visit counts → probabilities)
+
+Value target (game result from the perspective of the player to move)
+
+Think of this as “data collection”. No weights are updated yet.
+
+🔹 2. Training
+
+Goal: update the neural network using the self-play data.
+
+Take the collected (input, policy, value) triples.
+
+Perform forward pass → compute loss → backprop → update weights.
+
+Usually done in mini-batches for efficiency.
+
+This is “learning from experience”. The network improves its move selection and evaluation.
+
+
+
+Perfect — this is the hardest but most crucial design choice in your project:
+“How do we map all possible moves in your 10×10 chess variant into a fixed-size vector for the NN policy head?”
+
+Let’s build it step by step.
+
+🔹 1. The Goal
+
+We want a fixed vector length (say 500–2000 entries) where each entry = “this specific move”.
+
+Neural nets can’t output “dynamic” lists (like “whatever legal moves exist”), they need one fixed output layer.
+
+So: We define a universal move index space, and for each position, mask out the illegal moves.
+
+🔹 2. Representing Moves
+
+In chess (and variants), a move = from-square → to-square [+ promotion type].
+
+a) From–To Squares
+
+Board is 10×10 = 100 squares.
+
+Any move is a pair: (fromSquare, toSquare).
+
+That’s 100 × 100 = 10,000 slots in the worst case.
+
+Most are illegal in any given position, but it’s a fixed space.
+
+b) Promotions
+
+If pawns can promote (yours can, I assume?), then for each promotion type, you need extra slots.
+
+E.g. if 4 promotion types → multiply those target squares by 4.
+
+c) Special moves
+
+Castling: not in your variant.
+
+En passant: already encoded as a to-square.
+
+Camel/Zebra moves: already covered by normal from-to mapping.
+
+So the universal move space can just be “from 100 squares to 100 squares” + promotions.
+
+🔹 3. Example Encoding
+
+We flatten this into a 1D vector index:
+
+
+
+yes, I'm wondering what the mcts is needed for when the nn is already suggesting moves ...
+ChatGPT said:
+
+Great question ⚡ — you’re right to notice the tension: if the network already gives move probabilities, why wrap it in Monte Carlo Tree Search (MCTS)?
+
+Let’s break it down:
+🔹 Why Not Just Play the NN’s Policy?
+
+If you only used the NN’s policy output:
+
+    The net suggests a move distribution (like “move A: 0.40, move B: 0.25, move C: 0.10…”).
+
+    You could sample or pick the highest probability move.
+
+👉 But early in training, the network is weak and random. Playing only from its policy would give very poor games and very poor training data.
+🔹 What MCTS Adds
+
+    Search & Lookahead
+
+        The NN gives immediate evaluations.
+
+        MCTS simulates games ahead, guided by the policy + value, to test lines deeper than one ply.
+
+        This reduces blunders because the NN’s initial guesses are corrected by search.
+
+    Policy sharpening
+
+        After many simulations, MCTS produces an improved distribution of moves:
+
+            Moves leading to strong futures get more visits.
+
+            Bad moves get pruned away.
+
+        This “improved policy” is what you store as the training target.
+
+    Stability in training
+
+        The NN learns not from its own raw guesses, but from the MCTS-refined moves.
+
+        This creates a feedback loop:
+
+            NN guides search.
+
+            Search produces stronger targets.
+
+            NN learns from those → gets better → search gets better.
+
+🔹 How They Work Together
+
+Simplified loop for one move in self-play:
+
+Encode position → NN.forward(input) → (policy, value)
+          │
+          ▼
+MCTS expands nodes, guided by policy priors
+          │
+          ▼
+Run N rollouts → get visit counts for each move
+          │
+          ▼
+Choose move (sample from visits, or argmax)
+          │
+          ▼
+Save (input, improved policy, final game result) for training
+
+🔹 Intuition
+
+    NN alone = a “static intuition.”
+
+    MCTS alone = brute-force search (too slow).
+
+    NN + MCTS = intuition-guided search → strong and efficient.
+
+This is the exact trick behind AlphaZero, Leela Chess Zero, KataGo, etc.
+
+✅ So, the NN suggests what to look at, and MCTS confirms/refines which moves are really good.
+Over time, the NN absorbs the strength of the search, making MCTS more powerful in turn.
+
+Would you like me to sketch a mini MCTS loop in JS pseudocode that plugs into your Network.forward() so you can see how they talk to each other?
+You said:
+fisrt I want to know where the validity check for a move comes into play
+ChatGPT said:
+
+Excellent focus ⚡ — the validity check is absolutely central, because your NN + MCTS will generate numbers for all 10,000 possible (from → to) moves, but only a fraction are legal in the current position.
+
+Here’s where it fits in:
+🔹 Validity in the Pipeline
+
+    NN Forward Pass
+
+        Policy head outputs 10,000 probabilities (one per move index).
+
+        At this stage, it doesn’t “know” which are legal.
+
+    Masking Illegal Moves
+
+        Use your game engine / move generator to list legal moves in the position.
+
+        Map them to their policy indices.
+
+        Set all other probabilities to 0.
+
+        Renormalize the legal probabilities so they sum to 1.
+
+    const mask = new Array(10000).fill(0);
+    for (let move of legalMoves) {
+        mask[move.index] = 1;
+    }
+    const legalPolicy = softmax(policy.map((p, i) => mask[i] ? p : -Infinity));
+
+    MCTS Expansion
+
+        When a node expands, only the legal moves are considered as children.
+
+        Each child is initialized with its NN prior (policy probability).
+
+    Game Execution
+
+        Once MCTS picks a move, your environment must also validate and apply it (update the board state).
+
+🔹 Intuition
+
+    NN says: “Out of all 10,000 moves, I think these look good.”
+
+    Move generator says: “But only this subset is legal right now.”
+
+    Masking step: Filters the NN’s raw suggestions down to the legal set.
+
+    MCTS: Explores only those legal moves.
+
+🔹 Where to Implement?
+
+In your project you’ll likely have:
+
+    Encoder → turns board into 1601 input vector.
+
+    Network.forward() → outputs policy + value.
+
+    Game / MoveGen class → generates legal moves and their indices.
+
+    SelfPlay loop → masks policy with legal moves before search.
+
+So the validity check is enforced inside the SelfPlay / MCTS step, after the NN produces raw outputs but before MCTS expands nodes or selects moves.
+
+👉 Would you like me to show you how to design the MoveEncoder (move ↔ index mapping) so that your legalMoves list can directly mask the NN’s policy output? That’s the missing link between your game engine and the network.
+You said:
+to make move suggestions, the network has to generate moves, how does this happen?
+ChatGPT said:
+
+This is the key point 💡 — a neural network never actually generates moves itself.
+
+Instead:
+🔹 What the Network Really Outputs
+
+    Your NN’s policy head produces a probability distribution over all possible move indices (10,000 in your 10×10 case).
+
+    Each index corresponds to a (fromSquare → toSquare) pair.
+
+    Example:
+
+    index 1234 → move "b2 → b4"
+    index 7777 → move "i8 → g6"
+
+    These numbers are just scores/probabilities, not actual moves.
+
+🔹 How Moves Are “Generated”
+
+    Game engine (your move generator) computes the set of legal moves in the current position.
+    Example: ["a1b3", "a1c2", "h7h8Q"]
+
+    Encoder converts each move into its index in the policy vector (0…9999).
+
+    NN forward() returns a vector like:
+
+    policy = [0.0, 0.0003, 0.15, 0.0, 0.2, ...]
+    value = 0.35
+
+    Mask invalid moves:
+
+        All indices not in the legal set are zeroed out.
+
+        Remaining ones are renormalized into a valid probability distribution.
+
+    Selection:
+
+        You can sample from this legal distribution (adds exploration).
+
+        Or take the argmax (strongest suggestion).
+
+        Or let MCTS use it as “priors” for guided search.
+
+🔹 Intuition
+
+    The network does not invent moves.
+
+    The move generator invents moves (according to chess rules).
+
+    The network ranks them (which ones look promising).
+
+So:
+
+    NN = “intuition about which moves are promising”
+
+    Engine = “strict rules of the game”
+
+    MCTS = “search to improve on intuition”
+
+👉 Next step for your project is to build the MoveEncoder class so your engine can map "a1b3" ↔ policy index (and vice versa). That way, the NN’s probabilities connect directly to actual moves.
+
+Do you want me to sketch that MoveEncoder next?
+You said:
+so the network asssigns a policy/value pair to each source suqare/target square combination BEFORE the illegal moves are sorted out?
+ChatGPT said:
+
+Exactly ✅ — that’s the right mental model.
+🔹 Step by Step
+
+    Policy head output
+
+        The network has no chess rules built in.
+
+        It just computes 10,000 scores (for all 100 from-squares × 100 to-squares).
+
+        This is done before checking legality.
+
+        So things like “a1 → a1” or “king jumps 5 squares” all get numbers too.
+
+    Value head output
+
+        At the same time, the network gives a single scalar value (position evaluation).
+
+        This applies to the whole position, not to individual moves.
+
+    Masking stage
+
+        Your move generator finds the legal subset (say, 35 moves).
+
+        You mask the policy vector, setting everything else to 0.
+
+        Then renormalize so probabilities over legal moves sum to 1.
+
+    Use in play/search
+
+        The masked policy is used for move selection (sampling/argmax).
+
+        MCTS uses it as priors for guiding search.
+
+        The value head is used to estimate how good leaf nodes are.
+
+🔹 Why This Design?
+
+    The NN’s job is pattern recognition, not rules enforcement.
+
+    Rules are enforced externally by the engine.
+
+    This separation keeps the network simple and allows it to generalize better (e.g. “knight-like jumps are often strong here” — without hardcoding what a knight is).
+
+✅ So yes:
+
+    Policy: initially covers all from→to pairs.
+
+    Legality check: comes after, to prune illegal ones.
+
+    Value: single number for the whole board, always valid.
+
+Do you want me to now sketch a MoveEncoder class (like we did with Encoder for inputs) that maps a move "a1b3" ↔ policy index (and vice versa)? That’s the missing link between the network’s raw policy vector and your legal move generator.
+You said:
+wouldn't it be smarter to sort the illegal moves out before the forward function is called?
+ChatGPT said:
+
+That’s a sharp thought ⚡ — it feels natural to say “why waste time predicting moves we already know are illegal?” But here’s why all AlphaZero-style systems do the legality check after the forward pass:
+🔹 Why predict all moves first?
+
+    Fixed output size
+
+        A neural net architecture expects a fixed number of outputs.
+
+        If you only produced “legal moves,” the output dimension would vary from ~10 moves (in zugzwang) to ~218 (in a crazy middlegame) — which breaks matrix math and training.
+
+        By always outputting 10,000 slots, the network is consistent.
+
+    Generalization
+
+        The NN doesn’t need to “know the rules,” it just learns patterns.
+
+        Illegal moves get zero probability during training (masked), so the network gradually learns not to “waste” weight capacity on them.
+
+    Training target alignment
+
+        During training, your policy targets come from MCTS visit counts.
+
+        These targets also live in the same fixed 10,000-dimensional space.
+
+        Masking keeps everything aligned and simple.
+
+🔹 Downsides of “mask before forward”
+
+    If you try to cut the network down to only legal moves before forward(), you’d need:
+
+        A dynamic-sized output layer (hard to implement efficiently).
+
+        A new weight matrix every time (not practical).
+
+    The network couldn’t learn general move priors across different positions, because the index mapping would change constantly.
+
+🔹 Middle ground?
+
+There are variants of this idea:
+
+    Some engines use action encodings that already exclude obviously impossible actions (e.g. “knight jump” channels rather than full from→to grid).
+
+    But even then, legality is enforced after forward(), because rules like “no moving pinned piece” are contextual.
+
+✅ Bottom line:
+It’s smarter (and much simpler) to let the NN always output the full policy vector, then mask out illegal moves afterward. That’s why LCZero, AlphaZero, KataGo, and everyone else do it this way.
+
+Would you like me to show you a visual diagram of the data flow (NN full policy → mask → legal distribution → MCTS), so you see exactly where the legality filter plugs in?
+
+
+ChatGPT can make mistakes. Check important info. See Cookie Preferences.
+
