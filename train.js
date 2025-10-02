@@ -23,14 +23,14 @@ var game = new(require("../client/js/moves.js").asMoves)(logger);
 // save net on hard disk after session
 
 var history = []; // contains a history of all selected moves where vector, predictions, move index and the position score are saved
-var drawValue = -0.5; // is 0 for an equal start position. if white has an advantage, it should be a value < 0 and >= -1 black vice versa.
+var drawValue = settings.drawValue;
 var fensStudied = 0;
 var gamesPlayed = 0;
 var startFen = "10/8k1/10/6R1K1/10/10/10/10/10/10 w - - 0 1";
 var numberOfGames = 300; // currently replaced by settings.successRate
 var halfMoveClock = 0;
-var halfMoveMax = 2;
-const MOVE_PENALTY = -1; // 0.002;
+var halfMoveMax = settings.halfMoveMax;
+const MOVE_PENALTY = 0.002;
 
 network.loadFromDisk("scaramanga.json");
 

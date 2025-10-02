@@ -51,14 +51,14 @@ function Trainer(){
 
 			// --- Determine if this game should be replayed (automatic winning sequence replay) ---
 			var isWin = (game.resultWithoutPenalization == 1 ? true : false); // consider only wins for replay
-			const maxRepeats = 5;          // maximum times to replay a winning step
+			const maxRepeats = 1;          // maximum times to replay a winning step
 			const decay = 0.9;             // decay factor for repetitions
 			
 			let reps = (isWin == true ? maxRepeats : 1); // replay multiple times if win 1)
 				    logger.log({function: "trainFromGame", description: "after setting number of repetitions", data: {isWin: isWin, reps: reps, resultWithoutPenalization: game.resultWithoutPenalization}});
 			for (const step of game.history) {
 			                                        // if(step.selectedMove.move.from == "c8" && step.selectedMove.move.to == "d8"){
-			                                             logger.log({function: "trainFromGame", description: "history step", data: {move: step.selectedMove , moveProbabilty: step.predictions.probabilities[step.moveIndex]}});
+			                                             // logger.log({function: "trainFromGame", description: "history step", data: {move: step.selectedMove , moveProbabilty: step.predictions.probabilities[step.moveIndex]}});
 			                                        // }
 			    if (step.color === "b") {continue} //_t train only using whites moves
 			
