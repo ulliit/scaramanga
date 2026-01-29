@@ -10,7 +10,7 @@ var game = new(require("../client/js/moves.js").asMoves)(logger);
 
 // choose a start position
 // transform the position into an input vector that can be understood by the nn with boardEncoder.encode
-// create a nn using the input vector
+// then create a nn using the input vector
 // create a probabilities vector and a value for this position with nn.forward. each element of probabilities is the probability for a square pair to be the best move. value is the estimated score for the position BEFORE a move is made.
 // detect which elements of the probabilities vector represent legal moves using the Chess instance
 // pick one of the legal moves with a preference for the ones with better policy values
