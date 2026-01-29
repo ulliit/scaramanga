@@ -55,10 +55,10 @@ function Trainer(){
 			const decay = 0.9;             // decay factor for repetitions
 			
 			let reps = (isWin == true ? maxRepeats : 1); // replay multiple times if win 1)
-				    logger.log({function: "trainFromGame", description: "after setting number of repetitions", data: {isWin: isWin, reps: reps, resultWithoutPenalization: game.resultWithoutPenalization}});
+				    // logger.log({function: "trainFromGame", description: "after setting number of repetitions", data: {isWin: isWin, reps: reps, resultWithoutPenalization: game.resultWithoutPenalization}});
 			for (const step of game.history) {
 			                                         if(step.selectedMove.move.from == "c8" && step.selectedMove.move.to == "d8"){
-			                                              logger.log({function: "trainFromGame", description: "history step", data: {move: step.selectedMove , moveProbabilty: step.predictions.probabilities[step.moveIndex]}});
+			                                              logger.log({function: "trainFromGame", description: "history step", data: {moveIndex: step.moveIndex, move: step.selectedMove , moveProbabilty: step.predictions.probabilities[step.moveIndex]}});
 			                                         }
 			    if (step.color === "b") {continue} //_t train only using whites moves
 			
@@ -95,34 +95,34 @@ function Trainer(){
 ////                                                                                           console.log("predictions.probabilities.slice(0,5)", predictions.probabilities.slice(0,5));
 ////                                                                                           console.log("result", game.result)
 //			
-//					const valueLoss = (predictions.value - result) ** 2;
-//					                                           
-//					var probabilitiesLoss = 0;
-//					
-//					for (let i = 0; i < predictions.probabilities.length; i++) {
-//					
-//						if (probabilitiesForPlayedMove[i] > 0) {
-//						
-//							probabilitiesLoss -= Math.log(predictions.probabilities[i] + 1e-12); // epsilon to avoid log(0)
-//						
-//						}
-//					
-//					}
-//			  
-//					const totalLoss = valueLoss + probabilitiesLoss;
-//					                             logger.log({function: "trainFromGame", description: "after computing losses", data: {result: result, totalLoss: totalLoss, value: predictions.value, valueLoss: valueLoss}});
+					const valueLoss = (predictions.value - result) ** 2;
+					                                           
+					var probabilitiesLoss = 0;
+					
+					for (let i = 0; i < predictions.probabilities.length; i++) {
+					
+						if (probabilitiesForPlayedMove[i] > 0) {
+						
+							probabilitiesLoss -= Math.log(predictions.probabilities[i] + 1e-12); // epsilon to avoid log(0)
+						
+						}
+					
+					}
+			  
+					const totalLoss = valueLoss + probabilitiesLoss;
+					logger.log({function: "trainFromGame", description: "after computing losses", data: {result: result, totalLoss: totalLoss, value: predictions.value, probabilitiesLoss: probabilitiesLoss, valueLoss: valueLoss}});
 					var baseLearningRate = 0.05
 					
-					// --- Adaptive learning rate ---
-				    // Win/loss -> full LR
-				    // Draw -> smaller LR
-				    
-					let lrScale = (Math.abs(game.resultWithoutPenalization) === 1) ? 1.0 : 0.5;
-					let effectiveLearningRate = baseLearningRate * lrScale;
+//					// --- Adaptive learning rate ---
+//				    // Win/loss -> full LR
+//				    // Draw -> smaller LR
+//				    
+//					let lrScale = (Math.abs(game.resultWithoutPenalization) === 1) ? 1.0 : 0.5;
+//					let effectiveLearningRate = baseLearningRate * lrScale;
 				
 					// Update weights via backprop
 					
-					o.nn.backprop(step.vector, probabilitiesForPlayedMove, result, predictions, effectiveLearningRate, advantage);
+					o.nn.backprop(step.vector, probabilitiesForPlayedMove, result, predictions, baseLearningRate, advantage);
 
 					// reduce repetitions for winning sequences
 					repetitions *= decay;

@@ -30,7 +30,7 @@ var startFen = "10/8k1/10/6R1K1/10/10/10/10/10/10 w - - 0 1";
 var numberOfGames = 300; // currently replaced by settings.successRate
 var halfMoveClock = 0;
 var halfMoveMax = settings.halfMoveMax;
-const MOVE_PENALTY = 0.002;
+const MOVE_PENALTY = 0.1;
 
 network.loadFromDisk("scaramanga.json");
 
@@ -115,7 +115,7 @@ while (fensStudied < (settings.rounds * settings.fens.length)){
 		
 		var resultWithoutPenalization = result;
 
-		if(MOVE_PENALTY != -1){
+		if(MOVE_PENALTY != -1 && result == 1){
 		
 			let penalty = 1 - MOVE_PENALTY * game.currentPosition().moveNr; // penalize long mates (encourages shorter mating sequences).
 			penalty = Math.max(0, penalty);  // no negative -> the penalized result won't flip sign in extreme cases.
@@ -140,12 +140,12 @@ while (fensStudied < (settings.rounds * settings.fens.length)){
 		    function: "trainingLoop",
 		    description: "training game finished",
 		    data: {
-		        result,
-		        resultWithoutPenalization,
+		        result: result,
+		        resultWithoutPenalization: resultWithoutPenalization,
 		        fenIndex: currentFenIndex,
 		        fensStudied: fensStudied,
 		        finalFen: game.currentPosition().fen,
-		        startFen: startFen,
+		        // startFen: startFen,
 		        successRate: successRate,
 		        pgn: game.positionsToPgn({positions: game.getPositions()}).replace("&#189", "") + (game.currentPosition().kingState || "max halfmove nr of " + halfMoveMax + " exceeded.")
 		    }
