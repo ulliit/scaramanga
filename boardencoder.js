@@ -1,7 +1,7 @@
 function BoardEncoder() {
 
 	// --- Input boardEncoder ---
-	// Encodes a 10x10 board into 
+	// Encodes a 10x10 board 
 	// why 1601: one vector slot for each piece/square combination and one for the side to move -> 16 (pieces) * 100 (squares) + 1 = 1601 //_us
 	// note: nns need a fixed vector length and can't handle a dynamic one //_us
 
