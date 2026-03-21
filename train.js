@@ -1,4 +1,5 @@
 var boardEncoder = new (require('./boardencoder.js').BoardEncoder)({});
+var fairyStockfish = new (require('../server/engine.js').Engine)({engine: settings.engine, multiPV: settings.engine.multiPV}); // using fairy stockfish evals as a guidance for accelatered learning. 1) if these evals are not wanted, a dummy class with an appropriate interface can be used here.
 var logger = new (require('../client/js/log.js').logger);
 var settings = new (require('./settings.js').Settings)({});
 var moveEncoder = new (require('./moveencoder.js').MoveEncoder)({});
@@ -24,9 +25,11 @@ var game = new(require("../client/js/moves.js").asMoves)(logger);
 
 var history = []; // contains a history of all selected moves where vector, predictions, move index and the position score are saved
 var drawValue = settings.drawValue;
-var fensStudied = 0;
+var rounds = 0;
 var gamesPlayed = 0;
-var startFen = "10/8k1/10/6R1K1/10/10/10/10/10/10 w - - 0 1";
+var results = [];
+var startFen = "";
+var successRate = 0;
 var numberOfGames = 300; // currently replaced by settings.successRate
 var halfMoveClock = 0;
 var halfMoveMax = settings.halfMoveMax;
@@ -36,63 +39,81 @@ network.loadFromDisk("scaramanga.json");
 
 var currentFenIndex = settings.fens.length;
 
-while (fensStudied < (settings.rounds * settings.fens.length)){
+function newGame(){
 
-    currentFenIndex = currentFenIndex -1;
+	startFen = settings.startFen();
+	
+	startFen_ = startFen.split(" ");
+	startFen_[4] = 0; // reset the half move clock
+	startFen_[5] = 1; // reset the full move nr
+	
+	startFen = startFen_.join(" ");	 
+	
+	game.reset({initialFen: startFen, positions: []});
+	halfMoveClock = 0;
+	history = [];
+
+}
+
+function makeMove(){
+
+    const fen = game.currentPosition().fen;
+    const vector = boardEncoder.encode(fen); // fen encoded in a format suitable for network and training
+    const predictions = network.forward({vector});
+                                                            // logger.log({function: "nextMove", description: "after board vector generation", data: {boardVector: vector, predictions: predictions}});
+    const validMoves = validator.getValidMoves({fen, probabilities: predictions.probabilities});
+                                                            // logger.log({function: "nextMove", description: "after valid moves detection", data: {validMoves: validMoves}});
+    const selectedMove = validator.pickByPolicy({validMoves: validMoves, successRate: successRate});
     
-    halfMoveMax = halfMoveMax + 2;
+    halfMoveClock = parseInt(game.currentPosition().fen.split(" ")[4], 10);
+
+    history.push({
+            color: game.turn(),
+         selectedMove: selectedMove, // for debugging
+        moveIndex: selectedMove.index, // e.g. 324
+        predictions: predictions,
+        vector: vector // e.g. [0,0,1,0,...,1]
+    });
+                                                                 // console.log("turn", game.turn())
+    selectedMove.move.internal = false;
+    selectedMove.move.returnvalue = "";
+    game.moveAdd(selectedMove.move);
     
-    if(currentFenIndex == -1){
-    
-        currentFenIndex = settings.fens.length - 1;
-        halfMoveMax = 10;
+    // ask Stockfish for an eval
+
+    fairyStockfish.move({fen: game.currentPosition().fen, time: "movetime " + settings.engine.time});
         
-    }
-    
-    startFen = settings.fens[currentFenIndex];
-    
-    startFen_ = startFen.split(" ");
-    startFen_[4] = 0; // reset the half move clock
-    startFen_[5] = 1; // reset the full move nr
-    
-    startFen = startFen_.join(" ");
-    
-    console.log(startFen)
-    
-    let successRate = 0;
-    
-    let results = [];
+}
 
-	while (successRate < settings.successRate || results.length < 50) {
+fairyStockfish.on("engine ready", function() {
 
-		game.reset({initialFen: startFen, positions: []});
-		halfMoveClock = 0;
-		history = [];
+    console.log("Engine is ready. Starting self-play.");
+    
+    newGame();
+    makeMove();
 
-		while (game.gameStatus() === "running" && halfMoveClock < halfMoveMax) {
-		    const fen = game.currentPosition().fen;
-		    const vector = boardEncoder.encode(fen); // fen encoded in a format suitable for network and training
-		    const predictions = network.forward({vector});
-		                                                            // logger.log({function: "nextMove", description: "after board vector generation", data: {boardVector: vector, predictions: predictions}});
-		    const validMoves = validator.getValidMoves({fen, probabilities: predictions.probabilities});
-		                                                            // logger.log({function: "nextMove", description: "after valid moves detection", data: {validMoves: validMoves}});
-		    const selectedMove = validator.pickByPolicy({validMoves: validMoves, successRate: successRate});
-		    
-		    halfMoveClock = parseInt(game.currentPosition().fen.split(" ")[4], 10);
+});
 
-		    history.push({
-		            color: game.turn(),
-		         selectedMove: selectedMove, // for debugging
-		        moveIndex: selectedMove.index, // e.g. 324
-		        predictions: predictions,
-		        vector: vector // e.g. [0,0,1,0,...,1]
-		    });
-		                                                                 // console.log("turn", game.turn())
-		    selectedMove.move.internal = false;
-		    selectedMove.move.returnvalue = "";
-		    game.moveAdd(selectedMove.move);
-		}
+fairyStockfish.on("moved", function(o) {
 
+    // add stockfish eval to the last move
+    
+    // o contains a best moves object. sample:
+
+	//	{"bestMoves":[
+	//	{"cp":91,"variant":["f2f5","e9e6","g1c5","f9f8","f5e6","i10h7","h1g3","e10e6","d2d5","b9b6","c5a3","e6h6","e2e5","h6h2","d1f3","a9a7","i1j4"],"move":"f2f5","nr":1},
+	//	{"cp":82,"variant":["b1c4","c9c8","f2f5","f9f6","e2e4","h10f7","j2j5","e9e6","f5e6","e10e6","i1j4","j9j8","d2d5","e6e5","j4g3","b10c7"],"move":"b1c4","nr":2},
+	//	{"cp":67,"variant":["e2e5","f9f6","f2f4","e9e7","h1g3","f6e5","f4e5","d10h6","g1e3","h6e3","f1f10","e10f10","e1e3","b10c7","c2c3","c10d8"],"move":"e2e5","nr":3}]}}
+    
+    history[history.length-1].sfPolicyTarget = bestMoves[0].move;
+    history[history.length-1].sfValueTarget = bestMoves[0].cp;
+
+	if(game.gameStatus() === "running" && halfMoveClock < halfMoveMax) {
+	
+        makeMove();
+	    
+	}else{
+	
 		// Game finished, compute result
 		
 		let result = game.gameStatus();
@@ -135,34 +156,54 @@ while (fensStudied < (settings.rounds * settings.fens.length)){
 		}
 		
         successRate = (wins / results.length);
+													logger.log({
+														function: "trainingLoop",
+														description: "training game finished",
+														data: {
+															result: result,
+															resultWithoutPenalization: resultWithoutPenalization,
+															fenIndex: currentFenIndex,
+															fensStudied: fensStudied,
+															finalFen: game.currentPosition().fen,
+															// startFen: startFen,
+															successRate: successRate,
+															pgn: game.positionsToPgn({positions: game.getPositions()}).replace("&#189", "") + (game.currentPosition().kingState || "max halfmove nr of " + halfMoveMax + " exceeded.")
+														}
+													});
+	    
+        if(successRate > settings.successRate || results.length >= 50) {
+        
+            rounds = rounds + 1;
+        
+            if(rounds < settings.rounds){
+            
+                results = [];
+                successRate = 0;
+                
+                newGame();
+                makeMove();
+            
+            }else{
+ 
+				// Optional: run validation after training
 
-		logger.log({
-		    function: "trainingLoop",
-		    description: "training game finished",
-		    data: {
-		        result: result,
-		        resultWithoutPenalization: resultWithoutPenalization,
-		        fenIndex: currentFenIndex,
-		        fensStudied: fensStudied,
-		        finalFen: game.currentPosition().fen,
-		        // startFen: startFen,
-		        successRate: successRate,
-		        pgn: game.positionsToPgn({positions: game.getPositions()}).replace("&#189", "") + (game.currentPosition().kingState || "max halfmove nr of " + halfMoveMax + " exceeded.")
-		    }
-		});
-		
+				validator.validateNetwork({nn: network, numGames: 5, startFen});           
+            
+            }
+            
+        }else{
+        
+            newGame();
+            makeMove();
+                        
+        }
+        			
 	}
+    
+});
 
-	fensStudied ++
-	
-}
-
-// Save network after training
-network.saveToDisk("scaramanga.json");
-
-// Optional: run validation after training
-
-validator.validateNetwork({nn: network, numGames: 5, startFen});
+// 1) "This is often called supervised + reinforcement hybrid, imitation learning bootstrap, teacher-student distillation, or value/policy labeling ..."
+// https://x.com/i/grok?conversation=2034098359535898775
 
 
 

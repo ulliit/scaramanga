@@ -57,10 +57,10 @@ function Trainer(){
 			let reps = (isWin == true ? maxRepeats : 1); // replay multiple times if win 1)
 				    // logger.log({function: "trainFromGame", description: "after setting number of repetitions", data: {isWin: isWin, reps: reps, resultWithoutPenalization: game.resultWithoutPenalization}});
 			for (const step of game.history) {
-			                                         if(step.selectedMove.move.from == "c8" && step.selectedMove.move.to == "d8"){
-			                                              logger.log({function: "trainFromGame", description: "history step", data: {moveIndex: step.moveIndex, move: step.selectedMove , moveProbabilty: step.predictions.probabilities[step.moveIndex]}});
-			                                         }
-			    if (step.color === "b") {continue} //_t train only using whites moves
+//_260319			                                         if(step.selectedMove.move.from == "c8" && step.selectedMove.move.to == "d8"){
+//			                                              logger.log({function: "trainFromGame", description: "history step", data: {moveIndex: step.moveIndex, move: step.selectedMove , moveProbabilty: step.predictions.probabilities[step.moveIndex]}});
+//			                                         }
+//_260319			    if (step.color === "b") {continue} //_t train only using whites moves
 			
 			    let repetitions = reps;
 
