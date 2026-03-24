@@ -105,8 +105,8 @@ fairyStockfish.on("moved", function(o) {
 	//	{"cp":82,"variant":["b1c4","c9c8","f2f5","f9f6","e2e4","h10f7","j2j5","e9e6","f5e6","e10e6","i1j4","j9j8","d2d5","e6e5","j4g3","b10c7"],"move":"b1c4","nr":2},
 	//	{"cp":67,"variant":["e2e5","f9f6","f2f4","e9e7","h1g3","f6e5","f4e5","d10h6","g1e3","h6e3","f1f10","e10f10","e1e3","b10c7","c2c3","c10d8"],"move":"e2e5","nr":3}]}}
     
-    history[history.length-1].sfPolicyTarget = bestMoves[0].move;
-    history[history.length-1].sfValueTarget = bestMoves[0].cp;
+    history[history.length-1].sfPolicyTarget = validator.moveIndex({from: o.bestMoves[0].move.substring(0,2), to: o.bestMoves[0].move.substring(2,4));
+    history[history.length-1].sfValueTarget = o.bestMoves[0].cp;
 
 	if(game.gameStatus() === "running" && halfMoveClock < halfMoveMax) {
 	

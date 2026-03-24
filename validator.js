@@ -41,7 +41,7 @@ function Validator(){
 		
 		    for (let to = 0; to < 100; to++) {
 		    
-		        let index = from * 100 + to;
+		        let index = from * 100 + to; // samples: a1b1 = 1, a1c1 = 2, ..., a1j10 = 99, b1a1 = 100, b1b1 = 101 (invalid from-to combinations are part of the move indices vector)
 		        let score = o.probabilities[index];
 
 		        // build move object
@@ -138,6 +138,12 @@ function Validator(){
 		return o.validMoves[o.validMoves.length - 1];
 		
 	};
+	
+	this.moveIndex = function(o){ // from, to
+	
+	    return squareIndices[o.from] * 100 + squareIndices[o.to]
+	
+	}
 	
 	this.validateNetwork = function({nn, numGames, startFen}) {
 
