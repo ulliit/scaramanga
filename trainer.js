@@ -4,12 +4,12 @@ function Trainer(){
 
 	// --- Replay buffer setup ---
 	
-	const MAX_BUFFER_SIZE = 1; // keep last 1000 finished games
+	const MAX_BUFFER_SIZE = 16; // how many of the most recent games are used by trainFromGame
 	const buffer = [];
 
 	// --- Training after each game ---
 
-	this.trainFromGame = function(o) { // batch, nn, history, result, resultWithoutPenalization
+	this.trainFromGame = function(o) { // batch, nn, history, result
 	
 		// trainFromGame(history, result) is called once the game ends.
 		// Its job is to:
@@ -27,111 +27,88 @@ function Trainer(){
 		// --- Store current game into replay buffer ---
 		// Keep a buffer of recent games and train on random samples from it. Whereas a training only from the latest game would make a net highly unstable (catastrophic forgetting).
 		
-		buffer.push({history: JSON.parse(JSON.stringify(o.history)), result: o.result, resultWithoutPenalization: o.resultWithoutPenalization});
+	   buffer.push({history: JSON.parse(JSON.stringify(o.history)), result: o.result});
 		if (buffer.length > MAX_BUFFER_SIZE) buffer.shift();
 
-		const batch = [];
+		const batch = o.batch 
+		    ? Array.from({length: o.batch}, () => buffer[Math.floor(Math.random() * buffer.length)])
+		    : [buffer[buffer.length - 1]];
 
-        if(o.batch){
-        
-            // --- Sample a minibatch of games from buffer ---
-
-			for (let i = 0; i < o.batch; i++) {
-				batch.push(buffer[Math.floor(Math.random() * buffer.length)]);
-			}
-			
-		}else{
-		
-		    batch.push(buffer[buffer.length-1]);
-		
-		}
-
-		// --- Train from sampled minibatch ---
 		for (const game of batch) {
 
-			// --- Determine if this game should be replayed (automatic winning sequence replay) ---
-			var isWin = (game.resultWithoutPenalization == 1 ? true : false); // consider only wins for replay
-			const maxRepeats = 1;          // maximum times to replay a winning step
-			const decay = 0.9;             // decay factor for repetitions
-			
-			let reps = (isWin == true ? maxRepeats : 1); // replay multiple times if win 1)
-				    // logger.log({function: "trainFromGame", description: "after setting number of repetitions", data: {isWin: isWin, reps: reps, resultWithoutPenalization: game.resultWithoutPenalization}});
-			for (const step of game.history) {
-//_260319			                                         if(step.selectedMove.move.from == "c8" && step.selectedMove.move.to == "d8"){
-//			                                              logger.log({function: "trainFromGame", description: "history step", data: {moveIndex: step.moveIndex, move: step.selectedMove , moveProbabilty: step.predictions.probabilities[step.moveIndex]}});
-//			                                         }
-//_260319			    if (step.color === "b") {continue} //_t train only using whites moves
-			
-			    let repetitions = reps;
+		    const isWin = (o.result === 1);
+		    let reps = isWin ? 1 : 1;           // you can increase replay for wins later
 
-				while(repetitions > 0){
-				
-				    // one-hot target for played move
+		    for (const step of game.history) {
 
-					var probabilitiesForPlayedMove = Array(step.predictions.probabilities.length).fill(0); // probabilities for the move that was played
-					probabilitiesForPlayedMove[step.moveIndex] = 1; 
+		        let repetitions = reps;
+		        while (repetitions > 0) {
 
-					// Forward pass (get current outputs) 1)
-//					                                                                       console.log("step.predictions.probabilities.slice(0,5)", step.predictions.probabilities.slice(0,5));
-//					                                                                      console.log("step.predictions.value", step.predictions.value);
-//                                                                                           console.log("selectedMove: " + JSON.stringify(step.selectedMove.move) + ", step.color: " + step.color)
-					const predictions = o.nn.forward({vector: step.vector});
-					
-					let result = game.result;
-					
-					if (step.color === "b") {
+		            // Forward pass
+		            const predictions = o.nn.forward({vector: step.vector});
 
-						result = -game.result; // flip perspective for Black
-						
-					}
-					
-					// advantage = (target - baseline)
-					
-                    let advantage = result - predictions.value;
+		            // Target value (flip for black)
+		            let targetValue = (step.color === "b") ? -game.result : game.result;
 
-//					// Loss diagnostics optional for debugging, te real loss computing happens in the nn.backprop.			
-////					                                                                       console.log("probabilitiesForPlayedMove", JSON.stringify(probabilitiesForPlayedMove));
-////					                                                                       console.log("predictions.value", predictions.value);
-////                                                                                           console.log("predictions.probabilities.slice(0,5)", predictions.probabilities.slice(0,5));
-////                                                                                           console.log("result", game.result)
-//			
-					const valueLoss = (predictions.value - result) ** 2;
-					                                           
-					var probabilitiesLoss = 0;
-					
-					for (let i = 0; i < predictions.probabilities.length; i++) {
-					
-						if (probabilitiesForPlayedMove[i] > 0) {
-						
-							probabilitiesLoss -= Math.log(predictions.probabilities[i] + 1e-12); // epsilon to avoid log(0)
-						
-						}
-					
-					}
-			  
-					const totalLoss = valueLoss + probabilitiesLoss;
-					logger.log({function: "trainFromGame", description: "after computing losses", data: {result: result, totalLoss: totalLoss, value: predictions.value, probabilitiesLoss: probabilitiesLoss, valueLoss: valueLoss}});
-					var baseLearningRate = 0.05
-					
-//					// --- Adaptive learning rate ---
-//				    // Win/loss -> full LR
-//				    // Draw -> smaller LR
-//				    
-//					let lrScale = (Math.abs(game.resultWithoutPenalization) === 1) ? 1.0 : 0.5;
-//					let effectiveLearningRate = baseLearningRate * lrScale;
-				
-					// Update weights via backprop
-					
-					o.nn.backprop(step.vector, probabilitiesForPlayedMove, result, predictions, baseLearningRate, advantage);
+		            // ====================== VALUE LOSS ======================
+		            let valueLoss = (predictions.value - targetValue) ** 2;
 
-					// reduce repetitions for winning sequences
-					repetitions *= decay;
-					repetitions = Math.floor(repetitions);
+		            // NEW: Stockfish auxiliary value loss (dense supervision)
+		            let auxValueLoss = 0;
+		            if (step.sfValueTarget !== undefined && step.sfValueTarget !== null) {
+		                auxValueLoss = (predictions.value - step.sfValueTarget) ** 2;
+		            }
 
-				} // end while repetition
+		            // Combine (start with strong SF weight)
+		            const totalValueLoss = valueLoss + 0.8 * auxValueLoss;
 
-			} // end for each step
-		} // end for each game in batch
+		            // ====================== POLICY LOSS ======================
+		            // One-hot for the move actually played (your original REINFORCE)
+		            let playedTarget = Array(step.predictions.probabilities.length).fill(0);
+		            playedTarget[step.moveIndex] = 1;
+
+		            let policyLoss = 0;
+		            for (let i = 0; i < predictions.probabilities.length; i++) {
+		                if (playedTarget[i] > 0) {
+		                    policyLoss -= Math.log(predictions.probabilities[i] + 1e-12);
+		                }
+		            }
+
+		            // NEW: Stockfish policy distillation (imitate best move)
+		            let distillationLoss = 0;
+		            if (step.sfPolicyTarget) {
+		            
+		                if (step.sfPolicyTarget >= 0 && step.sfPolicyTarget < predictions.probabilities.length) {
+		                    const prob = predictions.probabilities[step.sfPolicyTarget];
+		                    distillationLoss = -Math.log(Math.max(prob, 1e-12));
+		                }
+		                
+		            }
+
+		            const totalPolicyLoss = policyLoss + 0.7 * distillationLoss;
+
+		            // Total loss
+		            const totalLoss = totalValueLoss + totalPolicyLoss;
+
+		            // Optional: log to see the new terms
+		            // logger.log({function: "trainFromGame", sfValueLoss: auxValueLoss, sfPolicyLoss: distillationLoss});
+
+		            // Backpropagation
+		            const advantage = targetValue - predictions.value;
+		            o.nn.backprop(
+		                step.vector, 
+		                playedTarget,           // still use played move for main policy
+		                targetValue, 
+		                predictions, 
+		                0.05,                   // your base LR
+		                advantage
+		            );
+
+		            repetitions *= 0.9;
+		            repetitions = Math.floor(repetitions);
+		        }
+		    }
+		}
 	  
 	} // end trainFromGame
 	

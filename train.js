@@ -2,7 +2,7 @@ var boardEncoder = new (require('./boardencoder.js').BoardEncoder)({});
 var fairyStockfish = new (require('../server/engine.js').Engine)({engine: settings.engine, multiPV: settings.engine.multiPV}); // using fairy stockfish evals as a guidance for accelatered learning. 1) if these evals are not wanted, a dummy class with an appropriate interface can be used here.
 var logger = new (require('../client/js/log.js').logger);
 var settings = new (require('./settings.js').Settings)({});
-var moveEncoder = new (require('./moveencoder.js').MoveEncoder)({});
+// var moveEncoder = new (require('./moveencoder.js').MoveEncoder)({});
 var network = new (require('./network.js').Network)({});
 var trainer = new (require('./trainer.js').Trainer)({});
 var validator = new (require('./validator.js').Validator)();
@@ -81,7 +81,7 @@ function makeMove(){
     
     // ask Stockfish for an eval
 
-    fairyStockfish.move({fen: game.currentPosition().fen, time: "movetime " + settings.engine.time});
+    fairyStockfish.move({fen: fen, time: "movetime " + settings.engine.time});
         
 }
 
@@ -106,7 +106,14 @@ fairyStockfish.on("moved", function(o) {
 	//	{"cp":67,"variant":["e2e5","f9f6","f2f4","e9e7","h1g3","f6e5","f4e5","d10h6","g1e3","h6e3","f1f10","e10f10","e1e3","b10c7","c2c3","c10d8"],"move":"e2e5","nr":3}]}}
     
     history[history.length-1].sfPolicyTarget = validator.moveIndex({from: o.bestMoves[0].move.substring(0,2), to: o.bestMoves[0].move.substring(2,4));
-    history[history.length-1].sfValueTarget = o.bestMoves[0].cp;
+   
+    // Why cp/400? It's an empirically tuned scale factor that maps cp scores roughly to win probability (similar to logistic/Pawn=100 scaling in traditional engines).+400 cp ≈ +0.76 value (strong advantage)
+    // +800 cp ≈ +0.96 value (very winning)
+    // 0 cp ≈ 0.0 value (roughly equal)
+    // -∞ cp (mate in few) → approaches -1
+    // tanh bounds it nicely to [-1, +1], which matches your value head output (tanh activation, win/loss framing).
+
+    history[history.length-1].sfValueTarget = Math.tanh(o.bestMoves[0].cp / 400) 
 
 	if(game.gameStatus() === "running" && halfMoveClock < halfMoveMax) {
 	
@@ -134,17 +141,17 @@ fairyStockfish.on("moved", function(o) {
 		
 		}
 		
-		var resultWithoutPenalization = result;
+//		var resultWithoutPenalization = result;
 
-		if(MOVE_PENALTY != -1 && result == 1){
-		
-			let penalty = 1 - MOVE_PENALTY * game.currentPosition().moveNr; // penalize long mates (encourages shorter mating sequences).
-			penalty = Math.max(0, penalty);  // no negative -> the penalized result won't flip sign in extreme cases.
-			result = result * penalty;
-			
-		}
+//		if(MOVE_PENALTY != -1 && result == 1){
+//		
+//			let penalty = 1 - MOVE_PENALTY * game.currentPosition().moveNr; // penalize long mates (encourages shorter mating sequences).
+//			penalty = Math.max(0, penalty);  // no negative -> the penalized result won't flip sign in extreme cases.
+//			result = result * penalty;
+//			
+//		}
 
-		trainer.trainFromGame({nn: network, history, result, resultWithoutPenalization});
+		trainer.trainFromGame({nn: network, history, result});
 		gamesPlayed++;
 		
 		if((gamesPlayed / 200) == Math.trunc(gamesPlayed / 200)){
