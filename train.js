@@ -59,7 +59,7 @@ function makeMove(){
 
     const fen = game.currentPosition().fen;
     const vector = boardEncoder.encode(fen); // fen encoded in a format suitable for network and training
-    const predictions = network.forward({vector});
+    // const predictions = network.forward({vector});
                                                             // logger.log({function: "nextMove", description: "after board vector generation", data: {boardVector: vector, predictions: predictions}});
     const validMoves = validator.getValidMoves({fen, probabilities: predictions.probabilities});
                                                             // logger.log({function: "nextMove", description: "after valid moves detection", data: {validMoves: validMoves}});
@@ -71,8 +71,9 @@ function makeMove(){
             color: game.turn(),
          selectedMove: selectedMove, // for debugging
         moveIndex: selectedMove.index, // e.g. 324
-        predictions: predictions,
-        vector: vector // e.g. [0,0,1,0,...,1]
+        // predictions: predictions,
+        vector: vector // e.g. [0,0,1,0,...,1]   
+        legalMoves: validMoves // required for masking illegal moves. see trainer.trainFromGame
     });
                                                                  // console.log("turn", game.turn())
     selectedMove.move.internal = false;

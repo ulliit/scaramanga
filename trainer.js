@@ -26,91 +26,104 @@ function Trainer(){
 
 		// --- Store current game into replay buffer ---
 		// Keep a buffer of recent games and train on random samples from it. Whereas a training only from the latest game would make a net highly unstable (catastrophic forgetting).
-		
-	   buffer.push({history: JSON.parse(JSON.stringify(o.history)), result: o.result});
-		if (buffer.length > MAX_BUFFER_SIZE) buffer.shift();
 
-		const batch = o.batch 
-		    ? Array.from({length: o.batch}, () => buffer[Math.floor(Math.random() * buffer.length)])
-		    : [buffer[buffer.length - 1]];
+        buffer.push({
+            history: JSON.parse(JSON.stringify(o.history)),
+            result: o.result
+        });
+        if (buffer.length > MAX_BUFFER_SIZE) buffer.shift();
 
-		for (const game of batch) {
+        // Mini-batch
+        const batch = o.batch 
+            ? Array.from({length: o.batch}, () => buffer[Math.floor(Math.random() * buffer.length)])
+            : [buffer[buffer.length - 1]];
 
-		    const isWin = (o.result === 1);
-		    let reps = isWin ? 1 : 1;           // you can increase replay for wins later
+        for (const game of batch) {
 
-		    for (const step of game.history) {
+            const targetResult = game.result;   // +1 / 0 / -1
 
-		        let repetitions = reps;
-		        while (repetitions > 0) {
+            for (const step of game.history) {
 
-		            // Forward pass
-		            const predictions = o.nn.forward({vector: step.vector});
+                let repetitions = (targetResult === 1) ? 1 : 1;
 
-		            // Target value (flip for black)
-		            let targetValue = (step.color === "b") ? -game.result : game.result;
+                while (repetitions > 0) {
 
-		            // ====================== VALUE LOSS ======================
-		            let valueLoss = (predictions.value - targetValue) ** 2;
+                    // Forward pass
+                    const predictions = o.nn.forward({vector: step.vector});
 
-		            // NEW: Stockfish auxiliary value loss (dense supervision)
-		            let auxValueLoss = 0;
-		            if (step.sfValueTarget !== undefined && step.sfValueTarget !== null) {
-		                auxValueLoss = (predictions.value - step.sfValueTarget) ** 2;
-		            }
+                    // Target value (flip for black)
+                    let targetValue = (step.color === "b") ? -targetResult : targetResult;
 
-		            // Combine (start with strong SF weight)
-		            const totalValueLoss = valueLoss + 0.8 * auxValueLoss;
+                    // ====================== VALUE LOSS ======================
+                    let valueLoss = (predictions.value - targetValue) ** 2;
 
-		            // ====================== POLICY LOSS ======================
-		            // One-hot for the move actually played (your original REINFORCE)
-		            let playedTarget = Array(step.predictions.probabilities.length).fill(0);
-		            playedTarget[step.moveIndex] = 1;
+                    // Stockfish auxiliary value loss
+                    let auxValueLoss = 0;
+                    if (typeof step.sfValueTarget === "number") {
+                        auxValueLoss = (predictions.value - step.sfValueTarget) ** 2;
+                    }
 
-		            let policyLoss = 0;
-		            for (let i = 0; i < predictions.probabilities.length; i++) {
-		                if (playedTarget[i] > 0) {
-		                    policyLoss -= Math.log(predictions.probabilities[i] + 1e-12);
-		                }
-		            }
+                    const totalValueLoss = valueLoss + 0.8 * auxValueLoss;
 
-		            // NEW: Stockfish policy distillation (imitate best move)
-		            let distillationLoss = 0;
-		            if (step.sfPolicyTarget) {
-		            
-		                if (step.sfPolicyTarget >= 0 && step.sfPolicyTarget < predictions.probabilities.length) {
-		                    const prob = predictions.probabilities[step.sfPolicyTarget];
-		                    distillationLoss = -Math.log(Math.max(prob, 1e-12));
-		                }
-		                
-		            }
+                    // ====================== POLICY LOSS with LEGAL MASKING ======================
+                    // One-hot for the move actually played
+                    let playedTarget = new Array(predictions.probabilities.length).fill(0);
+                    playedTarget[step.moveIndex] = 1;
 
-		            const totalPolicyLoss = policyLoss + 0.7 * distillationLoss;
+                    let policyLoss = 0;
 
-		            // Total loss
-		            const totalLoss = totalValueLoss + totalPolicyLoss;
+                    // Create legal move mask (1 = legal, 0 = illegal)
+                    let legalMask = new Array(predictions.probabilities.length).fill(0);
 
-		            // Optional: log to see the new terms
-		            // logger.log({function: "trainFromGame", sfValueLoss: auxValueLoss, sfPolicyLoss: distillationLoss});
+                    if (step.legalMoves && Array.isArray(step.legalMoves)) {
+                        for (let m of step.legalMoves) {
+                            if (m.index !== undefined) {
+                                legalMask[m.index] = 1;
+                            }
+                        }
+                    }
 
-		            // Backpropagation
-		            const advantage = targetValue - predictions.value;
-		            o.nn.backprop(
-		                step.vector, 
-		                playedTarget,           // still use played move for main policy
-		                targetValue, 
-		                predictions, 
-		                0.05,                   // your base LR
-		                advantage
-		            );
+                    // Compute policy loss only on legal moves + played move
+                    for (let i = 0; i < predictions.probabilities.length; i++) {
+                        if (playedTarget[i] > 0 || legalMask[i] === 1) {
+                            policyLoss -= Math.log(Math.max(predictions.probabilities[i], 1e-12));
+                        }
+                    }
 
-		            repetitions *= 0.9;
-		            repetitions = Math.floor(repetitions);
-		        }
-		    }
-		}
-	  
-	} // end trainFromGame
+                    // Stockfish policy distillation (only if SF move is legal)
+                    let distillationLoss = 0;
+                    if (typeof step.sfPolicyTarget === "number") {
+                        const idx = step.sfPolicyTarget;
+                        if (idx >= 0 && idx < predictions.probabilities.length && legalMask[idx] === 1) {
+                            distillationLoss = -Math.log(Math.max(predictions.probabilities[idx], 1e-12));
+                        }
+                    }
+
+                    const totalPolicyLoss = policyLoss + 0.7 * distillationLoss;
+
+                    // Total loss
+                    const totalLoss = totalValueLoss + totalPolicyLoss;
+
+                    // Optional logging
+                    // logger.log({ auxValue: auxValueLoss.toFixed(4), distLoss: distillationLoss.toFixed(4), legalMoves: step.legalMoves?.length || 0 });
+
+                    // Backpropagation
+                    const advantage = targetValue - predictions.value;
+                    o.nn.backprop(
+                        step.vector, 
+                        playedTarget,
+                        targetValue, 
+                        predictions, 
+                        0.05,
+                        advantage
+                    );
+
+                    repetitions *= 0.9;
+                    repetitions = Math.floor(repetitions);
+                }
+            }
+        }
+    };
 	
 }
 
