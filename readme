@@ -1,0 +1,11 @@
+alpha zero inspired reinforcement learning project for tactalaris, but in a certain fashion:
+
+I want the nn to play against an opponent with a fixed playing strength. this fixed version should be an earlier version of the net itself. as follows: the first version of the net plays against a random mover unless it beats this random mover with a certain win rate. then exchange the random mover with this nn version and let the nn play against it unless the win rate is achieved again. then replace the older version of the fixed nn with the new one. and so on ... 
+
+gemini:
+
+the network plays against a frozen, older version of itself (or a baseline like random) and only graduates/advances when a target win-rate threshold is reached. this a form of League Training or Self-Play with an Archive/Snapshot Opponent Pool.
+
+This is an effective way to bootstrap a complex game from scratch, because playing strictly against a purely random mover can teach an agent bad habits (overly greedy plays that only work against random moves), whereas a fixed progressive ladder gives it steady milestones.
+
+https://gemini.google.com/app/9d817c9532e98051?dest=create
